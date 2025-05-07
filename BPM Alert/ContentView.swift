@@ -141,7 +141,7 @@ struct MetronomeView: View {
     private var minBPMText: String {
         String(format: "%.f", minBPM)
     }
-    private let maxBPM: Double = 400
+    private let maxBPM: Double = 500
     private var maxBPMText: String {
         String(format: "%.f", maxBPM)
     }
@@ -180,38 +180,38 @@ struct MetronomeView: View {
 
     // MARK: ------ Main Content Layout ------
     var body: some View {
-        VStack(spacing: 40) {
-            BeatIndicatorRow(beatsPerBar: $conductor.beatsPerBar, currentBeat: conductor.currentBeat)
-            Spacer()
-            bpmTextAlertButton
-            bpmSliderButtons
-            volumeSliderButtons
-            timeSignatureButtons(beatsPerBar: $conductor.beatsPerBar, updateSequencer: conductor.updateSequencer)
-            Spacer()
-            toggleMetronomeButton
-            tapTempoButton
-        }
-        .padding()
-        .onAppear {
-            lastVolumeLevel = volumeLevel
-            conductor.tempo = bpmNumber
-            conductor.volume = volumeLevel
-            conductor.start()
-        }
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            if newPhase == .active {
-                if !self.conductor.engine.avEngine.isRunning {
-                    self.conductor.start()
-                    self.conductor.loadInstrument()
-                }
-            } else if newPhase == .background {
-                conductor.stop()
-                conductor.sequencer.stop()
+        ScrollView {
+            VStack(spacing: 40) {
+                BeatIndicatorRow(beatsPerBar: $conductor.beatsPerBar, currentBeat: conductor.currentBeat)
+                timeSignatureButtons(beatsPerBar: $conductor.beatsPerBar, updateSequencer: conductor.updateSequencer)
+                bpmTextAlertButton
+                bpmSliderButtons
+                volumeSliderButtons
+                tapTempoButton
+                toggleMetronomeButton
             }
+            .padding()
+            .onAppear {
+                lastVolumeLevel = volumeLevel
+                conductor.tempo = bpmNumber
+                conductor.volume = volumeLevel
+                conductor.start()
+            }
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                if newPhase == .active {
+                    if !self.conductor.engine.avEngine.isRunning {
+                        self.conductor.start()
+                        self.conductor.loadInstrument()
+                    }
+                } else if newPhase == .background {
+                    conductor.stop()
+                    conductor.sequencer.stop()
+                }
+            }
+            .animation(.bouncy, value: bpmNumber)
+            .animation(.bouncy, value: isTapTempoButtonPressed)
+            .animation(.bouncy, value: volumeLevel)
         }
-        .animation(.bouncy, value: bpmNumber)
-        .animation(.bouncy, value: isTapTempoButtonPressed)
-        .animation(.bouncy, value: volumeLevel)
     }
     
     //MARK: ------ Beat Indicator Views ------
@@ -294,7 +294,7 @@ struct MetronomeView: View {
                     .frame(height: beatNumber == currentBeat ? 30 : 20)
                     .overlay(
                         Circle()
-                            .stroke(Color.blue, lineWidth: 2)
+                            .stroke(Color.blue, lineWidth: 1)
                     )
                     .animation(.snappy, value: currentBeat)
             }
@@ -437,12 +437,12 @@ struct MetronomeView: View {
     //MARK: Volume slider buttons
     private var volumeSliderButtons: some View {
         VStack(spacing: 5) {
-            Text("Volume Level:  \(volumeLevelText)".uppercased())
+            Text("Volume:  \(volumeLevelText)".uppercased())
                 .contentTransition(.numericText(value: volumeLevel))
                 .font(.headline)
                 .fontWeight(.bold)
-                .frame(maxWidth: 180, alignment: .leading)
-                .offset(x: 5)
+                .frame(maxWidth: 155, alignment: .leading)
+                .offset(x: 20)
             HStack {
                 Button(action: {
                     withAnimation {
@@ -510,29 +510,41 @@ struct MetronomeView: View {
     private var toggleMetronomeButton: some View {
         let tap = DragGesture(minimumDistance: 0)
             .onEnded({ isTapped in
-                withAnimation {
+                withAnimation(.easeIn(duration: 0.4)) {
                     isToggleMetronomeButtonPressed = false
-                    conductor.togglePlayback()
                 }
             })
             .updating($isToggleMetronomeButtonTapped) { (_, isTapped, _) in
-                withAnimation {
-                    isToggleMetronomeButtonPressed = true
-                }
+                if !isTapped && !isToggleMetronomeButtonPressed {
 #if os(iOS)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
 #endif
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        isToggleMetronomeButtonPressed = true
+                    }
+                    conductor.togglePlayback()
+                }
             }
 
         return HStack {
             HStack {
-                Image(systemName: conductor.isPlaying ? "stop.circle.fill" : "play.circle.fill")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundColor(conductor.isPlaying ? .red : .green)
+                Circle()
+                    .foregroundStyle(isToggleMetronomeButtonPressed ? .white.opacity(0.4) : .clear)
+                    .background(.thinMaterial)
+                    .overlay {
+                        Image(systemName: conductor.isPlaying ? "stop.fill" : "play.fill")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: 25, maxHeight: 25)
+                            .contentTransition(.symbolEffect(.replace, options: .speed(6)))
+                            .offset(x: conductor.isPlaying ? 0 : 3)
+                    }
             }
-            .frame(maxWidth: 100, maxHeight: 100)
-            .scaleEffect(isToggleMetronomeButtonPressed ? 0.95 : 1)
+            .foregroundStyle(.clear)
+            .frame(maxWidth: 80, maxHeight: 80)
+            .clipShape(Circle())
+            .scaleEffect(isToggleMetronomeButtonPressed ? 0.94 : 1)
             .gesture(tap)
             .accessibility(label: Text("Toggle Metronome button"))
         }
@@ -547,13 +559,15 @@ struct MetronomeView: View {
                 }
             })
             .updating($isTapTempoTapped) { (_, isTapped, _) in
-                withAnimation {
-                    isTapTempoButtonPressed = true
-                    handleTapTempoTaps()
+                if !isTapped && !isTapTempoButtonPressed {
+                    withAnimation {
+                        isTapTempoButtonPressed = true
+                        handleTapTempoTaps()
+                    }
+    #if os(iOS)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    #endif
                 }
-#if os(iOS)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-#endif
             }
 
         return HStack {
