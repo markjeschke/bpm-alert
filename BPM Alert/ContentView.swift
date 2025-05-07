@@ -60,6 +60,9 @@ class MetronomeConductor: ObservableObject {
         
         engine.output = PeakLimiter(Mixer(instrument, midiCallback), attackTime: 0.001, decayTime: 0.001, preGain: 0)
         
+        _ = sequencer.addTrack(for: instrument)
+        _ = sequencer.addTrack(for: midiCallback)
+        
         loadInstrument()
         loadSequencer()
     }
@@ -78,9 +81,6 @@ class MetronomeConductor: ObservableObject {
     }
 
     func loadSequencer() {
-        _ = sequencer.addTrack(for: instrument)
-        _ = sequencer.addTrack(for: midiCallback)
-        
         for track in sequencer.tracks {
             track.length = 4.0
             track.loopEnabled = true
