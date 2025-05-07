@@ -223,22 +223,24 @@ struct MetronomeView: View {
         }
     }
 
-
     struct BeatIndicator: View {
         let beatNumber: Int
         let currentBeat: Int
 
         var body: some View {
-            Circle()
-                .fill(beatNumber == currentBeat ?
-                      Color.blue :
-                        Color.gray.opacity(0.3))
-                .frame(height: beatNumber == currentBeat ? 30 : 20)
-                .overlay(
-                    Circle()
-                        .stroke(Color.blue, lineWidth: 2)
-                )
-                .animation(.spring, value: currentBeat)
+            HStack {
+                Circle()
+                    .fill(beatNumber == currentBeat ?
+                          Color.blue :
+                            Color.gray.opacity(0.3))
+                    .frame(height: beatNumber == currentBeat ? 30 : 20)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.blue, lineWidth: 2)
+                    )
+                    .animation(.snappy, value: currentBeat)
+            }
+            .frame(width: 30)
         }
     }
 
