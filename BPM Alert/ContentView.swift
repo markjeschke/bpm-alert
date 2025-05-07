@@ -54,10 +54,12 @@ struct ContentView: View {
         String(format: "%.f", maxVolumeLevel * 100)
     }
 
+    // MARK: ------ Main Content Layout ------
+
     var body: some View {
         VStack(spacing: 40) {
             Spacer()
-            bpmTextAlert
+            bpmTextAlertButton
             bpmSliderButtons
             volumeSliderButtons
             Spacer()
@@ -72,29 +74,9 @@ struct ContentView: View {
         .animation(.bouncy, value: volumeLevel)
     }
 
-    private func increaseTempo() {
-        if bpmNumber < maxBPM {
-            withAnimation {
-                bpmNumber += 1
-#if os(iOS)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-#endif
-            }
-        }
-    }
+    //MARK: ------ Extracted Button Views ------
 
-    private func decreaseTempo() {
-        if bpmNumber > minBPM {
-            withAnimation {
-                bpmNumber -= 1
-#if os(iOS)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-#endif
-            }
-        }
-    }
-
-    private var bpmTextAlert: some View {
+    private var bpmTextAlertButton: some View {
         Button {
             bpmText = ""
             showAlert.toggle()
@@ -126,6 +108,8 @@ struct ContentView: View {
                 }
         }
         .tint(.primary)
+
+        //MARK: Alert View
         .alert(
             Text(alertTitle),
             isPresented: $showAlert
@@ -139,6 +123,8 @@ struct ContentView: View {
                 }
             }
             .disabled(!isBPMRangeValid) // <- Disable OK button if the number entered is not within the range.
+
+            //MARK: TextField
             TextField("BPM", text: $bpmText, prompt: Text("\(String(format: "%.f", bpmNumber))").foregroundStyle(.secondary))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.center)
@@ -171,10 +157,7 @@ struct ContentView: View {
         .accessibility(label: Text("Enter the beats per minute (BPM) numerically."))
     }
 
-    private func adjustTempo(by amount: Double) {
-        bpmNumber = max(minBPM, min(maxBPM, bpmNumber + amount))
-    }
-
+    //MARK: Tempo sliders & buttons
     private var bpmSliderButtons: some View {
         VStack(spacing: 5) {
             Text("Tempo".uppercased())
@@ -222,6 +205,7 @@ struct ContentView: View {
         }
     }
 
+    //MARK: Volume slider buttons
     private var volumeSliderButtons: some View {
         VStack(spacing: 5) {
             Text("Volume Level:  \(volumeLevelText)".uppercased())
@@ -302,7 +286,7 @@ struct ContentView: View {
             .updating($isTapTempoTapped) { (_, isTapped, _) in
                 withAnimation {
                     isTapTempoButtonPressed = true
-                    handleTap()
+                    handleTapTempoTaps()
                 }
 #if os(iOS)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -327,11 +311,41 @@ struct ContentView: View {
             .gesture(tap)
             .accessibility(label: Text("Tap Tempo button"))
         }
-
-
     }
 
-    private func handleTap() {
+    //MARK: ------ Button Actions ------
+
+    //MARK: Tempo adustment buttons
+
+    private func increaseTempo() {
+        if bpmNumber < maxBPM {
+            withAnimation {
+                bpmNumber += 1
+#if os(iOS)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+#endif
+            }
+        }
+    }
+
+    private func decreaseTempo() {
+        if bpmNumber > minBPM {
+            withAnimation {
+                bpmNumber -= 1
+#if os(iOS)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+#endif
+            }
+        }
+    }
+
+    //MARK: Swipeable tempo calculations
+    private func adjustTempo(by amount: Double) {
+        bpmNumber = max(minBPM, min(maxBPM, bpmNumber + amount))
+    }
+
+    //MARK: Tap Tempo calculations
+    private func handleTapTempoTaps() {
         let now = Date().timeIntervalSince1970
         tapTimes.append(now)
 
@@ -353,30 +367,4 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-}
-
-struct CapsuleButtonStyle: ButtonStyle {
-    var bgColor: Color
-    var tapBgColor: Color
-
-    func simpleSuccess() {
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.warning)
-    }
-
-    func makeBody(configuration: Self.Configuration) -> some View {
-        configuration.label
-            .padding(10)
-            .frame(height: 44, alignment: .center)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(configuration.isPressed ? tapBgColor : bgColor)
-                }
-            )
-            .scaleEffect(configuration.isPressed ? 0.99: 1)
-            .foregroundColor(.primary)
-            .font(.system(.headline, design: .rounded))
-            .onTapGesture(perform: simpleSuccess)
-    }
 }
