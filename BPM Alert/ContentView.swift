@@ -220,32 +220,42 @@ struct MetronomeView: View {
         var updateSequencer: () -> Void
         
         var body: some View {
-            HStack {
-                Button {
-                    beatsPerBar = max(1, beatsPerBar - 1)
-                    updateSequencer()
-                } label: {
-                    Image(systemName: "minus")
-                        .aspectRatio(contentMode: .fit)
-                        .font(.system(size: 25.0, weight: .regular, design: .rounded))
+            VStack(spacing: 5) {
+                Text("Time Signature".uppercased())
+                    .font(.headline)
+                    .fontWeight(.bold)
+                HStack {
+                    Button {
+                        beatsPerBar = max(1, beatsPerBar - 1)
+                        updateSequencer()
+                    } label: {
+                        Image(systemName: "minus")
+                            .aspectRatio(contentMode: .fit)
+                            .font(.system(size: 25.0, weight: .regular, design: .rounded))
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibility(label: Text("Decrease the beats per bar by 1."))
+                    .disabled(beatsPerBar <= 1)
+                    
+                    Text("\(beatsPerBar)/4")
+                        .contentTransition(.numericText(value: Double(beatsPerBar)))
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .frame(width: 60)
+                        .animation(.snappy, value: beatsPerBar)
+                    
+                    Button {
+                        beatsPerBar = min(8, beatsPerBar + 1)
+                        updateSequencer()
+                    } label: {
+                        Image(systemName: "plus")
+                            .aspectRatio(contentMode: .fit)
+                            .font(.system(size: 25.0, weight: .regular, design: .rounded))
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibility(label: Text("Increase the beats per bar by 1."))
+                    .disabled(beatsPerBar >= 8)
                 }
-                .frame(width: 44, height: 44)
-                .accessibility(label: Text("Decrease the beats per bar by 1."))
-                .disabled(beatsPerBar <= 1)
-                
-                Text("\(beatsPerBar)/4")
-                
-                Button {
-                    beatsPerBar = min(8, beatsPerBar + 1)
-                    updateSequencer()
-                } label: {
-                    Image(systemName: "plus")
-                        .aspectRatio(contentMode: .fit)
-                        .font(.system(size: 25.0, weight: .regular, design: .rounded))
-                }
-                .frame(width: 44, height: 44)
-                .accessibility(label: Text("Increase the beats per bar by 1."))
-                .disabled(beatsPerBar >= 8)
             }
         }
     }
@@ -266,6 +276,8 @@ struct MetronomeView: View {
             }
             .padding(.horizontal)
             .frame(height: 40)
+            .animation(.spring(duration: 0.3), value: beatsPerBar)
+
         }
     }
 
