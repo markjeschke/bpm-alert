@@ -63,8 +63,20 @@ class MetronomeConductor: ObservableObject {
         
         engine.output = PeakLimiter(Mixer(instrument, midiCallback), attackTime: 0.001, decayTime: 0.001, preGain: 0)
         
+        loadInstrument()
+        
+        sequencer = SequencerTrack(targetNode: midiCallback)
+        // Set to 0.25 for faster beats
+        sequencer.length = 1.0
+        sequencer.loopEnabled = true
+        sequencer.add(noteNumber: 60, position: 0.0, duration: 0.1)
+        
+        // Set initial volume
+        instrument.volume = 1
+    }
+    
+    func loadInstrument() {
         do {
-            // Use a more reliable way to find the files
             if let accentURL = Bundle.main.url(forResource: "accent_C1", withExtension: "wav"),
                let beatURL = Bundle.main.url(forResource: "beat_C#1", withExtension: "wav") {
                 let accentFile = try AVAudioFile(forReading: accentURL)
@@ -76,15 +88,6 @@ class MetronomeConductor: ObservableObject {
         } catch {
             Log("Files Didn't Load: \(error)")
         }
-        
-        sequencer = SequencerTrack(targetNode: midiCallback)
-        // Set to 0.25 for faster beats
-        sequencer.length = 1.0
-        sequencer.loopEnabled = true
-        sequencer.add(noteNumber: 60, position: 0.0, duration: 0.1)
-        
-        // Set initial volume
-        instrument.volume = 1
     }
     
     func playMetronomeSound() {
@@ -112,6 +115,7 @@ class MetronomeConductor: ObservableObject {
 
 struct MetronomeView: View {
     @StateObject var conductor = MetronomeConductor()
+    @Environment(\.scenePhase) private var scenePhase
 
     private let defaultTempo: Double = 120
     
@@ -192,8 +196,16 @@ struct MetronomeView: View {
             conductor.volume = volumeLevel
             conductor.start()
         }
-        .onDisappear {
-            conductor.stop()
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .active {
+                if !self.conductor.engine.avEngine.isRunning {
+                    self.conductor.start()
+                    self.conductor.loadInstrument()
+                }
+            } else if newPhase == .background {
+                conductor.stop()
+                conductor.sequencer.stop()
+            }
         }
         .animation(.bouncy, value: bpmNumber)
         .animation(.bouncy, value: isTapTempoButtonPressed)
