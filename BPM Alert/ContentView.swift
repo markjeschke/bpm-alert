@@ -13,7 +13,7 @@ import AVFAudio
 class MetronomeConductor: ObservableObject {
     let engine = AudioEngine()
     var instrument = AppleSampler()
-    var sequencer: SequencerTrack!
+    var sequencer = Sequencer()
     var midiCallback: CallbackInstrument!
     
     @Published var isPlaying: Bool = false
@@ -30,8 +30,6 @@ class MetronomeConductor: ObservableObject {
         }
     }
     
-    @Published var accentFirstBeat: Bool = true
-    @Published var beatsPerMeasure: Int = 4
     @Published var currentBeat: Int = 0
     
     func togglePlayback() {
@@ -56,7 +54,7 @@ class MetronomeConductor: ObservableObject {
         midiCallback = CallbackInstrument { status, note, vel in
             if status == 144 { // Note On
                 DispatchQueue.main.async {
-                    self.playMetronomeSound()
+                    self.currentBeat = (self.currentBeat % 4) + 1
                 }
             }
         }
@@ -65,11 +63,17 @@ class MetronomeConductor: ObservableObject {
         
         loadInstrument()
         
-        sequencer = SequencerTrack(targetNode: midiCallback)
-        // Set to 0.25 for faster beats
-        sequencer.length = 1.0
-        sequencer.loopEnabled = true
-        sequencer.add(noteNumber: 60, position: 0.0, duration: 0.1)
+        _ = sequencer.addTrack(for: instrument)
+        _ = sequencer.addTrack(for: midiCallback)
+
+        for track in sequencer.tracks {
+            track.length = 4.0
+            track.loopEnabled = true
+            track.add(noteNumber: 24, velocity: 127, position: 0.0, duration: 0.1)
+            track.add(noteNumber: 24, velocity: 70, position: 1.0, duration: 0.1)
+            track.add(noteNumber: 24, velocity: 70, position: 2.0, duration: 0.1)
+            track.add(noteNumber: 24, velocity: 70, position: 3.0, duration: 0.1)
+        }
         
         // Set initial volume
         instrument.volume = 1
@@ -88,16 +92,6 @@ class MetronomeConductor: ObservableObject {
         } catch {
             Log("Files Didn't Load: \(error)")
         }
-    }
-    
-    func playMetronomeSound() {
-        // Update beat counter
-            currentBeat = (currentBeat % beatsPerMeasure) + 1
-        
-        
-        // Play different note for accent (first beat) vs regular beat
-        let volumeToPlay = (currentBeat == 1 && accentFirstBeat) ? 127 : 70
-        instrument.play(noteNumber: 24, velocity: MIDINoteNumber(volumeToPlay), channel: 0)
     }
     
     func start() {
@@ -178,9 +172,9 @@ struct MetronomeView: View {
     }
 
     // MARK: ------ Main Content Layout ------
-
     var body: some View {
         VStack(spacing: 40) {
+            BeatIndicatorRow(currentBeat: conductor.currentBeat)
             Spacer()
             bpmTextAlertButton
             bpmSliderButtons
@@ -210,6 +204,42 @@ struct MetronomeView: View {
         .animation(.bouncy, value: bpmNumber)
         .animation(.bouncy, value: isTapTempoButtonPressed)
         .animation(.bouncy, value: volumeLevel)
+    }
+    
+    struct BeatIndicatorRow: View {
+        let currentBeat: Int
+
+        var body: some View {
+            HStack(spacing: 15) {
+                ForEach(1...4, id: \.self) { beatNumber in
+                    BeatIndicator(
+                        beatNumber: beatNumber,
+                        currentBeat: currentBeat
+                    )
+                }
+            }
+            .padding(.horizontal)
+            .frame(height: 40)
+        }
+    }
+
+
+    struct BeatIndicator: View {
+        let beatNumber: Int
+        let currentBeat: Int
+
+        var body: some View {
+            Circle()
+                .fill(beatNumber == currentBeat ?
+                      Color.blue :
+                        Color.gray.opacity(0.3))
+                .frame(height: beatNumber == currentBeat ? 30 : 20)
+                .overlay(
+                    Circle()
+                        .stroke(Color.blue, lineWidth: 2)
+                )
+                .animation(.spring, value: currentBeat)
+        }
     }
 
     //MARK: ------ Extracted Button Views ------
@@ -401,7 +431,7 @@ struct MetronomeView: View {
                         isMuted = false
                     }
 #if os(iOS)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
 #endif
                 }, label: {
                     Image(systemName: !isMuted ? "speaker.wave.3.fill" : "speaker.wave.3")
@@ -437,9 +467,9 @@ struct MetronomeView: View {
         return HStack {
             HStack {
                 Image(systemName: conductor.isPlaying ? "stop.circle.fill" : "play.circle.fill")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .foregroundColor(conductor.isPlaying ? .red : .green)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundColor(conductor.isPlaying ? .red : .green)
             }
             .frame(maxWidth: 100, maxHeight: 100)
             .scaleEffect(isToggleMetronomeButtonPressed ? 0.95 : 1)
@@ -447,7 +477,7 @@ struct MetronomeView: View {
             .accessibility(label: Text("Toggle Metronome button"))
         }
     }
-    
+
     private var tapTempoButton: some View {
         let tap = DragGesture(minimumDistance: 0)
             .onEnded({ isTapped in
@@ -485,10 +515,8 @@ struct MetronomeView: View {
         }
     }
 
-    //MARK: ------ Button Actions ------
 
     //MARK: Tempo adustment buttons
-
     private func increaseTempo() {
         if bpmNumber < maxBPM {
             withAnimation {
