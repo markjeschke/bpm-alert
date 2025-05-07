@@ -8,6 +8,8 @@ Alert and Slider UI for a potential metronome app. Just add [AudioKit...](https:
 + Volume level control via slider.
 + Mute and maximum volume toggles for immediate changes. Toggling again, will return the volume level to its last value setting.
 
+https://github.com/user-attachments/assets/da7ae141-55cd-4940-beda-35bf93bb4069
+
 [https://github.com/markjeschke/bpm-alert](https://github.com/markjeschke/bpm-alert)
 
 **TODO:**
