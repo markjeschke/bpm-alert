@@ -17,7 +17,8 @@ class MetronomeConductor: ObservableObject {
     var midiCallback: CallbackInstrument!
     
     @Published var isPlaying: Bool = false
-    
+    @Published var currentBeat: Int = 0
+
     @Published var tempo: Double = 120.0 {
         didSet {
             sequencer.tempo = BPM(tempo)
@@ -29,9 +30,7 @@ class MetronomeConductor: ObservableObject {
             instrument.volume = 0.5 + Float(volume) * 0.5
         }
     }
-    
-    @Published var currentBeat: Int = 0
-    
+        
     func togglePlayback() {
         if isPlaying {
             stopPlayback()
@@ -62,10 +61,26 @@ class MetronomeConductor: ObservableObject {
         engine.output = PeakLimiter(Mixer(instrument, midiCallback), attackTime: 0.001, decayTime: 0.001, preGain: 0)
         
         loadInstrument()
-        
+        loadSequencer()
+    }
+
+    func loadInstrument() {
+        do {
+            if let accentURL = Bundle.main.url(forResource: "accent_C1", withExtension: "wav") {
+                let accentFile = try AVAudioFile(forReading: accentURL)
+                try instrument.loadAudioFiles([accentFile])
+            } else {
+                Log("Could not find audio files")
+            }
+        } catch {
+            Log("Files Didn't Load: \(error)")
+        }
+    }
+
+    func loadSequencer() {
         _ = sequencer.addTrack(for: instrument)
         _ = sequencer.addTrack(for: midiCallback)
-
+        
         for track in sequencer.tracks {
             track.length = 4.0
             track.loopEnabled = true
@@ -73,24 +88,6 @@ class MetronomeConductor: ObservableObject {
             track.add(noteNumber: 24, velocity: 70, position: 1.0, duration: 0.1)
             track.add(noteNumber: 24, velocity: 70, position: 2.0, duration: 0.1)
             track.add(noteNumber: 24, velocity: 70, position: 3.0, duration: 0.1)
-        }
-        
-        // Set initial volume
-        instrument.volume = 1
-    }
-    
-    func loadInstrument() {
-        do {
-            if let accentURL = Bundle.main.url(forResource: "accent_C1", withExtension: "wav"),
-               let beatURL = Bundle.main.url(forResource: "beat_C#1", withExtension: "wav") {
-                let accentFile = try AVAudioFile(forReading: accentURL)
-                let beatFile = try AVAudioFile(forReading: beatURL)
-                try instrument.loadAudioFiles([accentFile, beatFile])
-            } else {
-                Log("Could not find audio files")
-            }
-        } catch {
-            Log("Files Didn't Load: \(error)")
         }
     }
     
@@ -206,6 +203,7 @@ struct MetronomeView: View {
         .animation(.bouncy, value: volumeLevel)
     }
     
+    //MARK: ------ Beat Indicator Views ------
     struct BeatIndicatorRow: View {
         let currentBeat: Int
 
@@ -480,6 +478,7 @@ struct MetronomeView: View {
         }
     }
 
+    //MARK: Tap Tempo buttons
     private var tapTempoButton: some View {
         let tap = DragGesture(minimumDistance: 0)
             .onEnded({ isTapped in
