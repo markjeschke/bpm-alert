@@ -6,10 +6,128 @@
 //
 
 import SwiftUI
+import AudioKit
+import AudioKitEX
+import AVFAudio
 
-struct ContentView: View {
+class MetronomeConductor: ObservableObject {
+    let engine = AudioEngine()
+    var instrument = AppleSampler()
+    var sequencer: SequencerTrack!
+    var midiCallback: CallbackInstrument!
+    
+    @Published var isPlaying: Bool = false
+    
+    @Published var tempo: Double = 120.0 {
+        didSet {
+            sequencer.tempo = BPM(tempo)
+        }
+    }
+    
+    @Published var volume: Double = 1.0 {
+        didSet {
+            instrument.volume = 0.5 + Float(volume) * 0.5
+        }
+    }
+    
+    @Published var accentFirstBeat: Bool = true
+    @Published var beatsPerMeasure: Int = 4
+    @Published var currentBeat: Int = 0
+    
+    func togglePlayback() {
+        if isPlaying {
+            stopPlayback()
+        } else {
+            startPlayback()
+        }
+        isPlaying.toggle()
+    }
+    
+    func startPlayback() {
+        sequencer.playFromStart()
+    }
+    
+    func stopPlayback() {
+        sequencer.stop()
+        currentBeat = 0
+    }
+    
+    init() {
+        midiCallback = CallbackInstrument { status, note, vel in
+            if status == 144 { // Note On
+                DispatchQueue.main.async {
+                    self.playMetronomeSound()
+                }
+            }
+        }
+        
+        engine.output = PeakLimiter(Mixer(instrument, midiCallback), attackTime: 0.001, decayTime: 0.001, preGain: 0)
+        
+        do {
+            // Use a more reliable way to find the files
+            if let accentURL = Bundle.main.url(forResource: "accent_C1", withExtension: "wav"),
+               let beatURL = Bundle.main.url(forResource: "beat_C#1", withExtension: "wav") {
+                let accentFile = try AVAudioFile(forReading: accentURL)
+                let beatFile = try AVAudioFile(forReading: beatURL)
+                try instrument.loadAudioFiles([accentFile, beatFile])
+            } else {
+                Log("Could not find audio files")
+            }
+        } catch {
+            Log("Files Didn't Load: \(error)")
+        }
+        
+        sequencer = SequencerTrack(targetNode: midiCallback)
+        // Set to 0.25 for faster beats
+        sequencer.length = 1.0
+        sequencer.loopEnabled = true
+        sequencer.add(noteNumber: 60, position: 0.0, duration: 0.1)
+        
+        // Set initial volume
+        instrument.volume = 1
+    }
+    
+    func playMetronomeSound() {
+        // Update beat counter
+            currentBeat = (currentBeat % beatsPerMeasure) + 1
+        
+        
+        // Play different note for accent (first beat) vs regular beat
+        let volumeToPlay = (currentBeat == 1 && accentFirstBeat) ? 127 : 70
+        instrument.play(noteNumber: 24, velocity: MIDINoteNumber(volumeToPlay), channel: 0)
+    }
+    
+    func start() {
+        do {
+            try engine.start()
+        } catch {
+            print("AudioKit error: \(error)")
+        }
+    }
+    
+    func stop() {
+        engine.stop()
+    }
+}
+
+struct MetronomeView: View {
+    @StateObject var conductor = MetronomeConductor()
+
     private let defaultTempo: Double = 120
-    @AppStorage("bpmNumber") private var bpmNumber: Double = 120
+    
+    // Volume Level: Most are calculated as Double values, such as 0.0-1.0. For the displayed text, it's converted to percentage as 0-100%.
+    @AppStorage("volumeLevel") private var volumeLevel: Double = 1.0 {
+        didSet {
+            conductor.volume = volumeLevel
+        }
+    }
+    
+    @AppStorage("bpmNumber") private var bpmNumber: Double = 120 {
+        didSet {
+            conductor.tempo = bpmNumber
+        }
+    }
+    
     @State private var bpmText: String = ""
     @State private var showAlert: Bool = false
     @State private var isBPMRangeValid: Bool = false
@@ -37,8 +155,9 @@ struct ContentView: View {
     private let minTapAmount: Int = 3
     @State private var isTapTempoButtonPressed: Bool = false
 
-    // Volume Level: Most are calculated as Double values, such as 0.0-1.0. For the displayed text, it's converted to percentage as 0-100%.
-    @AppStorage("volumeLevel") private var volumeLevel: Double = 0.5
+    @GestureState private var isToggleMetronomeButtonTapped = false
+    @State private var isToggleMetronomeButtonPressed: Bool = false
+
     private var volumeLevelText: String {
         String(format: "%.f", volumeLevel * 100)
     }
@@ -63,11 +182,18 @@ struct ContentView: View {
             bpmSliderButtons
             volumeSliderButtons
             Spacer()
+            toggleMetronomeButton
             tapTempoButton
         }
         .padding()
         .onAppear {
             lastVolumeLevel = volumeLevel
+            conductor.tempo = bpmNumber
+            conductor.volume = volumeLevel
+            conductor.start()
+        }
+        .onDisappear {
+            conductor.stop()
         }
         .animation(.bouncy, value: bpmNumber)
         .animation(.bouncy, value: isTapTempoButtonPressed)
@@ -201,6 +327,7 @@ struct ContentView: View {
             }
             .onChange(of: bpmNumber, { _, newValue in
                 bpmText = String(format: "%.f", newValue)
+                conductor.tempo = newValue
             })
         }
     }
@@ -248,6 +375,7 @@ struct ContentView: View {
                             lastVolumeLevel = volumeLevel
                         }
                         isMuted = newValue <= minVolumeLevel
+                        conductor.volume = newValue
                     }
                 })
                 .onTapGesture(count: 2) {
@@ -276,6 +404,38 @@ struct ContentView: View {
         }
     }
 
+    //MARK: Toggle Metronome button
+    private var toggleMetronomeButton: some View {
+        let tap = DragGesture(minimumDistance: 0)
+            .onEnded({ isTapped in
+                withAnimation {
+                    isToggleMetronomeButtonPressed = false
+                    conductor.togglePlayback()
+                }
+            })
+            .updating($isToggleMetronomeButtonTapped) { (_, isTapped, _) in
+                withAnimation {
+                    isToggleMetronomeButtonPressed = true
+                }
+#if os(iOS)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+#endif
+            }
+
+        return HStack {
+            HStack {
+                Image(systemName: conductor.isPlaying ? "stop.circle.fill" : "play.circle.fill")
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .foregroundColor(conductor.isPlaying ? .red : .green)
+            }
+            .frame(maxWidth: 100, maxHeight: 100)
+            .scaleEffect(isToggleMetronomeButtonPressed ? 0.95 : 1)
+            .gesture(tap)
+            .accessibility(label: Text("Toggle Metronome button"))
+        }
+    }
+    
     private var tapTempoButton: some View {
         let tap = DragGesture(minimumDistance: 0)
             .onEnded({ isTapped in
@@ -366,5 +526,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    MetronomeView()
 }
