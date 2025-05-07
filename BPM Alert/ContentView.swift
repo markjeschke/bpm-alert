@@ -6,10 +6,133 @@
 //
 
 import SwiftUI
+import AudioKit
+import AudioKitEX
+import AVFAudio
 
-struct ContentView: View {
+class MetronomeConductor: ObservableObject {
+    let engine = AudioEngine()
+    var instrument = AppleSampler()
+    var sequencer = Sequencer()
+    var midiCallback: CallbackInstrument!
+    
+    @Published var isPlaying: Bool = false
+    @Published var currentBeat: Int = 0
+    @Published var beatsPerBar: Int = 4
+
+    @Published var tempo: Double = 120.0 {
+        didSet {
+            sequencer.tempo = BPM(tempo)
+        }
+    }
+    
+    @Published var volume: Double = 1.0 {
+        didSet {
+            instrument.volume = 0.5 + Float(volume) * 0.5
+        }
+    }
+        
+    func togglePlayback() {
+        if isPlaying {
+            stopPlayback()
+        } else {
+            startPlayback()
+        }
+        isPlaying.toggle()
+    }
+    
+    func startPlayback() {
+        sequencer.playFromStart()
+    }
+    
+    func stopPlayback() {
+        sequencer.stop()
+        currentBeat = 0
+    }
+    
+    init() {
+        midiCallback = CallbackInstrument { status, note, vel in
+            if status == 144 { // Note On
+                DispatchQueue.main.async {
+                    if self.currentBeat >= self.beatsPerBar {
+                        self.currentBeat = 0
+                    }
+                    self.currentBeat += 1
+                }
+            }
+        }
+        
+        engine.output = PeakLimiter(Mixer(instrument, midiCallback), attackTime: 0.001, decayTime: 0.001, preGain: 0)
+        
+        _ = sequencer.addTrack(for: instrument)
+        _ = sequencer.addTrack(for: midiCallback)
+        
+        loadInstrument()
+        updateSequencer()
+    }
+
+    func loadInstrument() {
+        do {
+            if let accentURL = Bundle.main.url(forResource: "accent_C1", withExtension: "wav") {
+                let accentFile = try AVAudioFile(forReading: accentURL)
+                try instrument.loadAudioFiles([accentFile])
+            } else {
+                Log("Could not find audio files")
+            }
+        } catch {
+            Log("Files Didn't Load: \(error)")
+        }
+    }
+
+    func updateSequencer() {
+        for track in sequencer.tracks {
+            track.length = Double(beatsPerBar)
+            track.clear()
+            track.loopEnabled = true
+            track.add(noteNumber: 24, velocity: 127, position: 0.0, duration: 0.2)
+            
+            for beat in 1 ..< beatsPerBar {
+                track.add(noteNumber: 24, velocity: 70, position: Double(beat), duration: 0.2)
+            }
+        }
+        currentBeat = 0
+        if isPlaying {
+            sequencer.playFromStart()
+        }
+    }
+    
+    func start() {
+        do {
+            try engine.start()
+        } catch {
+            print("AudioKit error: \(error)")
+        }
+    }
+    
+    func stop() {
+        engine.stop()
+    }
+}
+
+struct MetronomeView: View {
+    @StateObject var conductor = MetronomeConductor()
+    @Environment(\.scenePhase) private var scenePhase
+
     private let defaultTempo: Double = 120
-    @AppStorage("bpmNumber") private var bpmNumber: Double = 120
+    
+    // Volume Level: Most are calculated as Double values, such as 0.0-1.0. For the displayed text, it's converted to percentage as 0-100%.
+    @AppStorage("volumeLevel") private var volumeLevel: Double = 1.0 {
+        didSet {
+            conductor.volume = volumeLevel
+        }
+    }
+    
+    @AppStorage("bpmNumber") private var bpmNumber: Double = 120 {
+        didSet {
+            conductor.tempo = bpmNumber
+        }
+    }
+    
     @State private var bpmText: String = ""
     @State private var showAlert: Bool = false
     @State private var isBPMRangeValid: Bool = false
@@ -37,8 +160,9 @@ struct ContentView: View {
     private let minTapAmount: Int = 3
     @State private var isTapTempoButtonPressed: Bool = false
 
-    // Volume Level: Most are calculated as Double values, such as 0.0-1.0. For the displayed text, it's converted to percentage as 0-100%.
-    @AppStorage("volumeLevel") private var volumeLevel: Double = 0.5
+    @GestureState private var isToggleMetronomeButtonTapped = false
+    @State private var isToggleMetronomeButtonPressed: Bool = false
+
     private var volumeLevelText: String {
         String(format: "%.f", volumeLevel * 100)
     }
@@ -55,23 +179,127 @@ struct ContentView: View {
     }
 
     // MARK: ------ Main Content Layout ------
-
     var body: some View {
         VStack(spacing: 40) {
+            BeatIndicatorRow(beatsPerBar: $conductor.beatsPerBar, currentBeat: conductor.currentBeat)
             Spacer()
             bpmTextAlertButton
             bpmSliderButtons
             volumeSliderButtons
+            timeSignatureButtons(beatsPerBar: $conductor.beatsPerBar, updateSequencer: conductor.updateSequencer)
             Spacer()
+            toggleMetronomeButton
             tapTempoButton
         }
         .padding()
         .onAppear {
             lastVolumeLevel = volumeLevel
+            conductor.tempo = bpmNumber
+            conductor.volume = volumeLevel
+            conductor.start()
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .active {
+                if !self.conductor.engine.avEngine.isRunning {
+                    self.conductor.start()
+                    self.conductor.loadInstrument()
+                }
+            } else if newPhase == .background {
+                conductor.stop()
+                conductor.sequencer.stop()
+            }
         }
         .animation(.bouncy, value: bpmNumber)
         .animation(.bouncy, value: isTapTempoButtonPressed)
         .animation(.bouncy, value: volumeLevel)
+    }
+    
+    //MARK: ------ Beat Indicator Views ------
+    struct timeSignatureButtons: View {
+        @Binding var beatsPerBar: Int
+        var updateSequencer: () -> Void
+        
+        var body: some View {
+            VStack(spacing: 5) {
+                Text("Time Signature".uppercased())
+                    .font(.headline)
+                    .fontWeight(.bold)
+                HStack {
+                    Button {
+                        beatsPerBar = max(1, beatsPerBar - 1)
+                        updateSequencer()
+                    } label: {
+                        Image(systemName: "minus")
+                            .aspectRatio(contentMode: .fit)
+                            .font(.system(size: 25.0, weight: .regular, design: .rounded))
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibility(label: Text("Decrease the beats per bar by 1."))
+                    .disabled(beatsPerBar <= 1)
+                    
+                    Text("\(beatsPerBar)/4")
+                        .contentTransition(.numericText(value: Double(beatsPerBar)))
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .frame(width: 60)
+                        .animation(.snappy, value: beatsPerBar)
+                    
+                    Button {
+                        beatsPerBar = min(8, beatsPerBar + 1)
+                        updateSequencer()
+                    } label: {
+                        Image(systemName: "plus")
+                            .aspectRatio(contentMode: .fit)
+                            .font(.system(size: 25.0, weight: .regular, design: .rounded))
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibility(label: Text("Increase the beats per bar by 1."))
+                    .disabled(beatsPerBar >= 8)
+                }
+            }
+        }
+    }
+    
+    //MARK: ------ Beat Indicator Views ------
+    struct BeatIndicatorRow: View {
+        @Binding var beatsPerBar: Int
+        let currentBeat: Int
+
+        var body: some View {
+            HStack(spacing: 15) {
+                ForEach(1...beatsPerBar, id: \.self) { beatNumber in
+                    BeatIndicator(
+                        beatNumber: beatNumber,
+                        currentBeat: currentBeat
+                    )
+                }
+            }
+            .padding(.horizontal)
+            .frame(height: 40)
+            .animation(.spring(duration: 0.3), value: beatsPerBar)
+
+        }
+    }
+
+    struct BeatIndicator: View {
+        let beatNumber: Int
+        let currentBeat: Int
+
+        var body: some View {
+            HStack {
+                Circle()
+                    .fill(beatNumber == currentBeat ?
+                          Color.blue :
+                            Color.gray.opacity(0.3))
+                    .frame(height: beatNumber == currentBeat ? 30 : 20)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.blue, lineWidth: 2)
+                    )
+                    .animation(.snappy, value: currentBeat)
+            }
+            .frame(width: 30)
+        }
     }
 
     //MARK: ------ Extracted Button Views ------
@@ -201,6 +429,7 @@ struct ContentView: View {
             }
             .onChange(of: bpmNumber, { _, newValue in
                 bpmText = String(format: "%.f", newValue)
+                conductor.tempo = newValue
             })
         }
     }
@@ -248,6 +477,7 @@ struct ContentView: View {
                             lastVolumeLevel = volumeLevel
                         }
                         isMuted = newValue <= minVolumeLevel
+                        conductor.volume = newValue
                     }
                 })
                 .onTapGesture(count: 2) {
@@ -261,7 +491,7 @@ struct ContentView: View {
                         isMuted = false
                     }
 #if os(iOS)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
 #endif
                 }, label: {
                     Image(systemName: !isMuted ? "speaker.wave.3.fill" : "speaker.wave.3")
@@ -276,6 +506,39 @@ struct ContentView: View {
         }
     }
 
+    //MARK: Toggle Metronome button
+    private var toggleMetronomeButton: some View {
+        let tap = DragGesture(minimumDistance: 0)
+            .onEnded({ isTapped in
+                withAnimation {
+                    isToggleMetronomeButtonPressed = false
+                    conductor.togglePlayback()
+                }
+            })
+            .updating($isToggleMetronomeButtonTapped) { (_, isTapped, _) in
+                withAnimation {
+                    isToggleMetronomeButtonPressed = true
+                }
+#if os(iOS)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+#endif
+            }
+
+        return HStack {
+            HStack {
+                Image(systemName: conductor.isPlaying ? "stop.circle.fill" : "play.circle.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundColor(conductor.isPlaying ? .red : .green)
+            }
+            .frame(maxWidth: 100, maxHeight: 100)
+            .scaleEffect(isToggleMetronomeButtonPressed ? 0.95 : 1)
+            .gesture(tap)
+            .accessibility(label: Text("Toggle Metronome button"))
+        }
+    }
+
+    //MARK: Tap Tempo buttons
     private var tapTempoButton: some View {
         let tap = DragGesture(minimumDistance: 0)
             .onEnded({ isTapped in
@@ -313,10 +576,8 @@ struct ContentView: View {
         }
     }
 
-    //MARK: ------ Button Actions ------
 
     //MARK: Tempo adustment buttons
-
     private func increaseTempo() {
         if bpmNumber < maxBPM {
             withAnimation {
@@ -366,5 +627,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    MetronomeView()
 }
