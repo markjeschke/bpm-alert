@@ -18,6 +18,7 @@ class MetronomeConductor: ObservableObject {
     
     @Published var isPlaying: Bool = false
     @Published var currentBeat: Int = 0
+    @Published var beatsPerBar: Int = 4
 
     @Published var tempo: Double = 120.0 {
         didSet {
@@ -53,7 +54,10 @@ class MetronomeConductor: ObservableObject {
         midiCallback = CallbackInstrument { status, note, vel in
             if status == 144 { // Note On
                 DispatchQueue.main.async {
-                    self.currentBeat = (self.currentBeat % 4) + 1
+                    if self.currentBeat >= self.beatsPerBar {
+                        self.currentBeat = 0
+                    }
+                    self.currentBeat += 1
                 }
             }
         }
@@ -64,7 +68,7 @@ class MetronomeConductor: ObservableObject {
         _ = sequencer.addTrack(for: midiCallback)
         
         loadInstrument()
-        loadSequencer()
+        updateSequencer()
     }
 
     func loadInstrument() {
@@ -80,14 +84,20 @@ class MetronomeConductor: ObservableObject {
         }
     }
 
-    func loadSequencer() {
+    func updateSequencer() {
         for track in sequencer.tracks {
-            track.length = 4.0
+            track.length = Double(beatsPerBar)
+            track.clear()
             track.loopEnabled = true
-            track.add(noteNumber: 24, velocity: 127, position: 0.0, duration: 0.1)
-            track.add(noteNumber: 24, velocity: 70, position: 1.0, duration: 0.1)
-            track.add(noteNumber: 24, velocity: 70, position: 2.0, duration: 0.1)
-            track.add(noteNumber: 24, velocity: 70, position: 3.0, duration: 0.1)
+            track.add(noteNumber: 24, velocity: 127, position: 0.0, duration: 0.2)
+            
+            for beat in 1 ..< beatsPerBar {
+                track.add(noteNumber: 24, velocity: 70, position: Double(beat), duration: 0.2)
+            }
+        }
+        currentBeat = 0
+        if isPlaying {
+            sequencer.playFromStart()
         }
     }
     
@@ -171,11 +181,12 @@ struct MetronomeView: View {
     // MARK: ------ Main Content Layout ------
     var body: some View {
         VStack(spacing: 40) {
-            BeatIndicatorRow(currentBeat: conductor.currentBeat)
+            BeatIndicatorRow(beatsPerBar: $conductor.beatsPerBar, currentBeat: conductor.currentBeat)
             Spacer()
             bpmTextAlertButton
             bpmSliderButtons
             volumeSliderButtons
+            timeSignatureButtons(beatsPerBar: $conductor.beatsPerBar, updateSequencer: conductor.updateSequencer)
             Spacer()
             toggleMetronomeButton
             tapTempoButton
@@ -204,12 +215,49 @@ struct MetronomeView: View {
     }
     
     //MARK: ------ Beat Indicator Views ------
+    struct timeSignatureButtons: View {
+        @Binding var beatsPerBar: Int
+        var updateSequencer: () -> Void
+        
+        var body: some View {
+            HStack {
+                Button {
+                    beatsPerBar = max(1, beatsPerBar - 1)
+                    updateSequencer()
+                } label: {
+                    Image(systemName: "minus")
+                        .aspectRatio(contentMode: .fit)
+                        .font(.system(size: 25.0, weight: .regular, design: .rounded))
+                }
+                .frame(width: 44, height: 44)
+                .accessibility(label: Text("Decrease the beats per bar by 1."))
+                .disabled(beatsPerBar <= 1)
+                
+                Text("\(beatsPerBar)/4")
+                
+                Button {
+                    beatsPerBar = min(8, beatsPerBar + 1)
+                    updateSequencer()
+                } label: {
+                    Image(systemName: "plus")
+                        .aspectRatio(contentMode: .fit)
+                        .font(.system(size: 25.0, weight: .regular, design: .rounded))
+                }
+                .frame(width: 44, height: 44)
+                .accessibility(label: Text("Increase the beats per bar by 1."))
+                .disabled(beatsPerBar >= 8)
+            }
+        }
+    }
+    
+    //MARK: ------ Beat Indicator Views ------
     struct BeatIndicatorRow: View {
+        @Binding var beatsPerBar: Int
         let currentBeat: Int
 
         var body: some View {
             HStack(spacing: 15) {
-                ForEach(1...4, id: \.self) { beatNumber in
+                ForEach(1...beatsPerBar, id: \.self) { beatNumber in
                     BeatIndicator(
                         beatNumber: beatNumber,
                         currentBeat: currentBeat
